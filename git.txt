@@ -1,0 +1,4 @@
+运行./genwqe_gzip linux.tar -c >./linux.tar.gz
+LD_PRELOAD=./libnxz.so genwqe_gzip linux.tar -c >./linux_nx.tar.gz
+
+上面是用zlib压缩，下面是用nx压缩
