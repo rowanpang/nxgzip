@@ -148,8 +148,8 @@ function usage () {
 		    -l          loops num [$loops]
 		    -j          jobs num  [$threads]
 		    -n          nodes list  [$nodes]
-		    -o          not devnull [$todevnull]
-		    -z          not cmpZlib [$cmpZlib]
+		    -o          if to devnull [$todevnull]
+		    -z          if cmpZlib [$cmpZlib]
 		    -d          for genwqe_gzip  use defualt options [$options]
 		    -v          more 'v' more msg [$verbose]
 	"
