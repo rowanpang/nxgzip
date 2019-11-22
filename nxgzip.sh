@@ -5,7 +5,7 @@ threads=1
 todevnull="yes"
 cmpZlib="yes"
 options="-i 1MiB -o 1MiB"
-nodes=0
+nodes=
 
 file="linux/git.tar"
 fileName="${file##*\/}"
@@ -55,7 +55,11 @@ function nxgzipComp(){
 	[[ "$todevnull" == "yes" ]] && filegz="/dev/null";
 
 	pr_debug "%04d: nxgzipComp starting" "$suffix"
-	time=`{ time LD_PRELOAD=/root/nxgzip/ver-0.59/nx-zlib_v0.59/libnxz.so numactl -N $nodes ./genwqe_gzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+	if [ "X$nodes" == "X" ]; then
+	    time=`{ time LD_PRELOAD=/root/nxgzip/ver-0.59/nx-zlib_v0.59/libnxz.so ./genwqe_gzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+	else
+	    time=`{ time LD_PRELOAD=/root/nxgzip/ver-0.59/nx-zlib_v0.59/libnxz.so numactl -N $nodes ./genwqe_gzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+	fi
 	filegzSize=`stat -c %s $filegz`
 	pr_notice "%04d: nxgzipComp finished $time,size $filegzSize" "$suffix"
 
@@ -64,7 +68,7 @@ function nxgzipComp(){
 	gunzip	$filegz -c > $filetar
 	[[ $? ]] && rm -f $filegz
 
-	md5=`md5sum $filetar | awk '{print $1}'` 
+	md5=`md5sum $filetar | awk '{print $1}'`
 	if [ $md5 != $filemd5 ]; then
 		pr_err "$suffix: md5 check error for orgfile: $file, gzipfile:$filegz, tarfile:$filetar"
 		exit 1
@@ -99,7 +103,7 @@ function nxgzipThread(){
 		nxgzipComp $i &
 	done
 	pr_debug "-------nxgzipThread all start up: `date +%H:%M:%S`------"
-	jobids=`echo $(jobs -p)` 
+	jobids=`echo $(jobs -p)`
 	pr_debug "-------jobs: %s" "$jobids"
 
 	wait
@@ -114,7 +118,7 @@ function zlibThread(){
 		zlibComp $i &
 	done
 	pr_debug "-------zlibThread all start up: `date +%H:%M:%S`------"
-	jobids=`echo $(jobs -p)` 
+	jobids=`echo $(jobs -p)`
 	pr_debug "-------jobs: %s" "$jobids"
 
 	wait
@@ -129,7 +133,7 @@ function loopTest(){
 	for i in `seq 1 $loops`;do
 		pr_notice "-----nxgzip loop %2d: `date +%H:%M:%S`" "$i"
 		nxgzipThread $threads
-		echo 
+		echo
 	done
 
 	[[ $cmpZlib == "yes" ]] || return
@@ -137,12 +141,12 @@ function loopTest(){
 	for i in `seq 1 $loops`;do
 		pr_notice "-----zlib loop %2d: `date +%H:%M:%S`" "$i"
 		zlibThread $threads
-		echo 
+		echo
 	done
 }
 
-function usage () {                                                                                                                                                                                    
-	echo "Usage :  $0 [options] 
+function usage () {
+	echo "Usage :  $0 [options]
 		Options:
 		    -h          this help
 		    -l          loops num [$loops]
@@ -204,7 +208,7 @@ function main(){
 trap 'onCtrlC' INT
 function onCtrlC () {
     pr_notice 'Ctrl+C is captured'
-    jobids=`echo $(jobs -p)` 
+    jobids=`echo $(jobs -p)`
     pr_debug "do kill $jobids,Exit 0"
     kill $jobids
     exit 0
