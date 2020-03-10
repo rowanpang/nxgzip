@@ -1,5 +1,12 @@
 #!/bin/bash
 
+<<EOF
+cmd example
+    put: ./test.sh -j 64 -f /run/s3tmp/binutils-2.27.tar
+    get: ./test.sh -j 64 -g
+    cln: ./test.sh -c
+EOF
+
 cachedir="/run/s3tmp/"
 verbose="5"
 
@@ -50,7 +57,7 @@ function s3cmdput(){
 	pr_notice "s3cmdput starting file:%s filestor:%s" "$file" "$filestor"
 
     	stats=`s3cmd --no-progress --disable-multipart --no-check-md5 put  $file s3://$bk/$filestor | awk '{print "bytes,seconds,mb/s",$5,$8,$10}'`
-	
+
 	pr_notice "s3cmdput finished. file:%s, time: %s" "$filestor" "$stats"
 }
 
@@ -120,7 +127,7 @@ function s3cmdgetJobs(){
 	for f in $filelist;do
 		s3cmdget $f &
 	done
-	
+
 	pr_debug "------s3cmdgetJobs all start up: `date +%H:%M:%S`------"
 
         jobids=`echo $(jobs -p)`

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-scp /etc/systemd/system/icfs-radosgw.target.wants/icfs-radosgw\@radosgw.gateway.service obj2:/etc/systemd/system/icfs-radosgw.target.wants/icfs-radosgw\@radosgw.gateway.service 
-scp /etc/systemd/system/icfs-radosgw.target.wants/icfs-radosgw\@radosgw.gateway.service obj3:/etc/systemd/system/icfs-radosgw.target.wants/icfs-radosgw\@radosgw.gateway.service 
+scp /usr/lib/systemd/system/icfs-radosgw\@.service obj2:/usr/lib/systemd/system/icfs-radosgw\@.service
+scp /usr/lib/systemd/system/icfs-radosgw\@.service obj3:/usr/lib/systemd/system/icfs-radosgw\@.service
 
 sleep 1
 ssh obj1 'systemctl daemon-reload'
