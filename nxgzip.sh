@@ -11,6 +11,8 @@ file="linux/git.tar"
 fileName="${file##*\/}"
 filemd5="bd422f5e2d9cb78e34e5a6f664bd87fb"
 
+pathlibnx="/root/nxgzip/ver-0.59/nx-zlib_v0.59/libnxz.so"
+cmdgzip="./genwqe_gzip"
 tmpdir='/run/'
 
 verbose="5"
@@ -44,122 +46,121 @@ function pr_err(){
 
 
 function file2cache(){
-	pr_notice "-----caching file"
-	cat $file > /dev/null;
+    pr_notice "-----caching file"
+    cat $file > /dev/null;
 }
 
 function nxgzipComp(){
-	suffix=$1
-	filegz="$tmpdir/$fileName.gz.$suffix"
-	filetar="$tmpdir/$fileName.$suffix"
-	[[ "$todevnull" == "yes" ]] && filegz="/dev/null";
+    suffix=$1
+    filegz="$tmpdir/$fileName.gz.$suffix"
+    filetar="$tmpdir/$fileName.$suffix"
+    [[ "$todevnull" == "yes" ]] && filegz="/dev/null";
 
-	pr_debug "%04d: nxgzipComp starting" "$suffix"
-	if [ "X$nodes" == "X" ]; then
-	    time=`{ time LD_PRELOAD=/root/nxgzip/ver-0.59/nx-zlib_v0.59/libnxz.so ./genwqe_gzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
-	else
-	    time=`{ time LD_PRELOAD=/root/nxgzip/ver-0.59/nx-zlib_v0.59/libnxz.so numactl -N $nodes ./genwqe_gzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
-	fi
-	filegzSize=`stat -c %s $filegz`
-	pr_notice "%04d: nxgzipComp finished $time,size $filegzSize" "$suffix"
+    pr_debug "%04d: nxgzipComp starting" "$suffix"
+    if [ "X$nodes" == "X" ]; then
+	time=`{ time LD_PRELOAD=$pathlibnx $cmdgzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    else
+	time=`{ time LD_PRELOAD=$pathlibnx numactl -N $nodes $cmdgzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    fi
+    filegzSize=`stat -c %s $filegz`
+    pr_notice "%04d: nxgzipComp finished $time,size $filegzSize" "$suffix"
 
-	[[ "$todevnull" == "yes" ]] && return;
+    [[ "$todevnull" == "yes" ]] && return;
 
-	gunzip	$filegz -c > $filetar
-	[[ $? ]] && rm -f $filegz
+    gunzip $filegz -c > $filetar
+    [[ $? ]] && rm -f $filegz
 
-	md5=`md5sum $filetar | awk '{print $1}'`
-	if [ $md5 != $filemd5 ]; then
-		pr_err "$suffix: md5 check error for orgfile: $file, gzipfile:$filegz, tarfile:$filetar"
-		exit 1
-	else
-		pr_debug "$suffix: md5 check ok"
-		rm -f $filetar
-	fi
+    md5=`md5sum $filetar | awk '{print $1}'`
+    if [ $md5 != $filemd5 ]; then
+	pr_err "$suffix: md5 check error for orgfile: $file, gzipfile:$filegz, tarfile:$filetar"
+	exit 1
+    else
+	pr_debug "$suffix: md5 check ok"
+	rm -f $filetar
+    fi
 }
 
 function zlibComp(){
-	suffix=$1
-	filegz="/dev/null"
-	filegz="$tmpdir/$fileName.gz.$suffix"
-	filetar="$tmpdir/$fileName.$suffix"
-	[[ "$todevnull" == "yes" ]] && filegz="/dev/null";
+    suffix=$1
+    filegz="/dev/null"
+    filegz="$tmpdir/$fileName.gz.$suffix"
+    filetar="$tmpdir/$fileName.$suffix"
+    [[ "$todevnull" == "yes" ]] && filegz="/dev/null";
 
-	pr_debug "%04d: zlibComp starting" "$suffix"
-	time=`{ time ./genwqe_gzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
-	filegzSize=`stat -c %s $filegz`
-	pr_notice "%04d: zlibComp finished $time, size $filegzSize" "$suffix"
-	[[ "$todevnull" == "yes" ]] && return;
+    pr_debug "%04d: zlibComp starting" "$suffix"
+    time=`{ time ./genwqe_gzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    filegzSize=`stat -c %s $filegz`
+    pr_notice "%04d: zlibComp finished $time, size $filegzSize" "$suffix"
+    [[ "$todevnull" == "yes" ]] && return;
 
-	rm -f $filegz
+    rm -f $filegz
 }
 
 function nxgzipThread(){
-	threads=$1
-	pr_debug "--------nxgzipThread start :$threads-------"
-	[[ $threads -eq 0 ]] && threads=4
+    threads=$1
+    pr_debug "--------nxgzipThread start :$threads-------"
+    [[ $threads -eq 0 ]] && threads=4
 
-	for i in `seq 1 $threads`;do
-		nxgzipComp $i &
-	done
-	pr_debug "-------nxgzipThread all start up: `date +%H:%M:%S`------"
-	jobids=`echo $(jobs -p)`
-	pr_debug "-------jobs: %s" "$jobids"
+    for i in `seq 1 $threads`;do
+	nxgzipComp $i &
+    done
+    pr_debug "-------nxgzipThread all start up: `date +%H:%M:%S`------"
+    jobids=`echo $(jobs -p)`
+    pr_debug "-------jobs: %s" "$jobids"
 
-	wait
-	pr_debug "--------nxgzipThread all finished:$threads-------"
+    wait
+    pr_debug "--------nxgzipThread all finished:$threads-------"
 }
 
 function zlibThread(){
-	pr_debug "--------zlibThread start :$threads-------"
-	threads=$1
-	[[ $threads -eq 0 ]] && threads=4
-	for i in `seq 1 $threads`;do
-		zlibComp $i &
-	done
-	pr_debug "-------zlibThread all start up: `date +%H:%M:%S`------"
-	jobids=`echo $(jobs -p)`
-	pr_debug "-------jobs: %s" "$jobids"
+    pr_debug "--------zlibThread start :$threads-------"
+    threads=$1
+    [[ $threads -eq 0 ]] && threads=4
+    for i in `seq 1 $threads`;do
+	zlibComp $i &
+    done
+    pr_debug "-------zlibThread all start up: `date +%H:%M:%S`------"
+    jobids=`echo $(jobs -p)`
+    pr_debug "-------jobs: %s" "$jobids"
 
-	wait
-	pr_debug "--------zlibThread all finished:$threads-------"
+    wait
+    pr_debug "--------zlibThread all finished:$threads-------"
 }
 
 function loopTest(){
-	loops=$1
-	threads=$2
-	[[ $loops -eq 0 ]] && loops=5
-	[[ $threads -eq 0 ]] && threads=1
-	for i in `seq 1 $loops`;do
-		pr_notice "-----nxgzip loop %2d: `date +%H:%M:%S`" "$i"
-		nxgzipThread $threads
-		echo
-	done
+    loops=$1
+    threads=$2
+    [[ $loops -eq 0 ]] && loops=5
+    [[ $threads -eq 0 ]] && threads=1
+    for i in `seq 1 $loops`;do
+	pr_notice "-----nxgzip loop %2d: `date +%H:%M:%S`" "$i"
+	nxgzipThread $threads
+	echo
+    done
 
-	[[ $cmpZlib == "yes" ]] || return
+    [[ $cmpZlib == "yes" ]] || return
 
-	for i in `seq 1 $loops`;do
-		pr_notice "-----zlib loop %2d: `date +%H:%M:%S`" "$i"
-		zlibThread $threads
-		echo
-	done
+    for i in `seq 1 $loops`;do
+	pr_notice "-----zlib loop %2d: `date +%H:%M:%S`" "$i"
+	zlibThread $threads
+	echo
+    done
 }
 
 function usage () {
-	echo "Usage :  $0 [options]
-		Options:
-		    -h          this help
-		    -l          loops num [$loops]
-		    -j          jobs num  [$threads]
-		    -n          nodes list  [$nodes]
-		    -o          if to devnull [$todevnull]
-		    -z          if cmpZlib [$cmpZlib]
-		    -d          for genwqe_gzip  use defualt options [$options]
-		    -v          more 'v' more msg [$verbose]
-	"
-    	exit 0
+    echo "Usage :  $0 [options]
+	Options:
+	    -h          this help
+	    -l          loops num [$loops]
+	    -j          jobs num  [$threads]
+	    -n          nodes list  [$nodes]
+	    -o          if to devnull [$todevnull]
+	    -z          if cmpZlib [$cmpZlib]
+	    -d          for genwqe_gzip  use defualt options [$options]
+	    -v          more 'v' more msg [$verbose]
+    "
+    exit 0
 }
-
 
 function main(){
     while getopts "hl:j:bzvn:" opt;do
