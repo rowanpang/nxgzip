@@ -8,18 +8,19 @@ options="-i 1MiB -o 1MiB"
 nodes=
 wktype="comp"
 
+tmpdir='/run/nxgzip'
+cmdgzip="/root/nx/git/genwqe_gzip"
+pathlibnx="/root/nx/libnxz.as13000.47e2c50.so"
+
 #put file in ram basedfs so ignore disk io limit.
-fcomp="linux/git.tar"
-fcompname="${file##*\/}"
+fcomp="$tmpdir/git.tar"
+fcompname="${fcomp##*\/}"
 fcompmd5="bd422f5e2d9cb78e34e5a6f664bd87fb"
 
-fdcomp="linux/git.tar.gz"
+fdcomp="$tmpdir/git.tar.gz"
 fdcompname="${fdcomp##*\/}"
 fdcompmd5="bd422f5e2d9cb78e34e5a6f664bd87fb"
 
-pathlibnx="/root/nxgzip/ver-0.59/nx-zlib_v0.59/libnxz.so"
-cmdgzip="./genwqe_gzip"
-tmpdir='/run/'
 
 verbose="5"
 function pr_debug(){
@@ -57,13 +58,13 @@ function nxComp(){
     ftar="$tmpdir/$fcompname.$sfx"
     [[ "$todevnull" == "yes" ]] && fgz="/dev/null";
 
-    pr_debug "%04d: nxComp starting" "$sfx"
+    pr_debug "%04d: nxComp starting,fcomp: $fcomp" "$sfx"
     if [ "X$nodes" == "X" ]; then
 	cmd="LD_PRELOAD=$pathlibnx $cmdgzip $options $fcomp -c > $fgz"
     else
 	cmd="LD_PRELOAD=$pathlibnx numactl -N $nodes $cmdgzip $options $fcomp -c > $fgz"
     fi
-    secspent=`{ time $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    secspent=`{ time eval $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
     fcompSize=`stat -c %s $fcomp`
     pr_notice "%04d: nxComp finished,time spend: $secspent, fcomp size: $fcompSize" "$sfx"
 
@@ -86,14 +87,15 @@ function nxdcomp(){
     sfx=$1
     ftar="$tmpdir/$fdcompname.$sfx.tar"
     [[ "$todevnull" == "yes" ]] && ftar="/dev/null";
-    pr_debug "%04d: nxdcomp starting" "$sfx"
+    pr_debug "%04d: nxdcomp starting,fdcomp: $fdcomp" "$sfx"
 
     if [ "X$nodes" == "X" ]; then
 	cmd="LD_PRELOAD=$pathlibnx $cmdgzip $options -d $fdcomp -c > $ftar"
     else
 	cmd="LD_PRELOAD=$pathlibnx numactl -N $nodes $cmdgzip $options -d $fdcomp -c > $ftar"
     fi
-    secspent=`{ time $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    #secspent=`{ time LD_PRELOAD=$pathlibnx $cmdgzip $options -d $fdcomp -c > $ftar; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    secspent=`{ time eval $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
     fdcompSize=`stat -c %s $fdcomp`
     pr_notice "%04d: nxdcomp finished,time spend: $secspent, fdcomp size: $fdcompSize" "$sfx"
 
@@ -115,14 +117,14 @@ function zlibComp(){
     fgz="$tmpdir/$fileName.gz.$sfx"
     [[ "$todevnull" == "yes" ]] && fgz="/dev/null";
 
-    pr_debug "%04d: zlibComp starting" "$sfx"
+    pr_debug "%04d: zlibComp starting,fcomp: $fcomp" "$sfx"
 
     if [ "X$nodes" == "X" ]; then
         cmd="$cmdgzip $options $fcomp -c > $fgz"
     else
         cmd="numactl -N $nodes $cmdgzip $options $fcomp -c > $fgz"
     fi
-    secspent=`{ time $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    secspent=`{ time eval $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
     fcompSize=`stat -c %s $fcomp`
     pr_notice "%04d: zlibcomp finished,time spend: $secspent, fcomp size: $fcompSize" "$sfx"
 
@@ -136,14 +138,14 @@ function zlibdcomp(){
     ftar="$tmpdir/$fdcompname.$sfx.tar"
     [[ "$todevnull" == "yes" ]] && ftar="/dev/null";
 
-    pr_debug "%04d: zlibdcomp starting" "$sfx"
+    pr_debug "%04d: zlibdcomp starting,fdcomp: $fdcomp" "$sfx"
 
     if [ "X$nodes" == "X" ]; then
 	cmd="$cmdgzip $options -d $fdcomp -c > $ftar"
     else
 	cmd="numactl -N $nodes $cmdgzip $options -d $fdcomp -c > $ftar"
     fi
-    secspent=`{ time $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    secspent=`{ time eval $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
     fdcompSize=`stat -c %s $fdcomp`
     pr_notice "%04d: zlibcomp finished,time spend: $secspent, fdcomp size: $fdcompSize" "$sfx"
 
@@ -217,10 +219,11 @@ function usage () {
     echo "Usage :  $0 [options]
 	Options:
 	    -h          this help
+	    -f 		target file [comp: $fcomp, dcomp: $fdcomp]
 	    -l          loops num [$loops]
 	    -j          jobs num  [$threads]
 	    -n          nodes list  [$nodes]
-	    -o          if to devnull [$todevnull]
+	    -i          ignore output file, current [$todevnull]
 	    -z          if compare to libz current [$cmpZlib]
 	    -r          reset preptions [$options]
 	    -d          do decmprees [$wktype]
@@ -230,11 +233,15 @@ function usage () {
 }
 
 function main(){
-    while getopts "hl:j:n:ozrdv" opt;do
+    while getopts "hf:l:j:n:izrdv" opt;do
         case $opt in
             h)
                 usage
                 ;;
+	    f)
+		fcomp="$OPTARG";
+		fdcomp="$OPTARG";
+		;;
             l)
                 loops="$OPTARG";
                 ;;
@@ -244,7 +251,7 @@ function main(){
             n)
                 nodes="$OPTARG";
                 ;;
-            o)
+            i)
                 todevnull="no";
                 ;;
             z)
