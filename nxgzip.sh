@@ -1,15 +1,21 @@
 #!/bin/bash
 
-loops=2
-threads=1
+loops=1
+threads=2
 todevnull="yes"
 cmpZlib="yes"
 options="-i 1MiB -o 1MiB"
 nodes=
+wktype="comp"
 
-file="linux/git.tar"
-fileName="${file##*\/}"
-filemd5="bd422f5e2d9cb78e34e5a6f664bd87fb"
+#put file in ram basedfs so ignore disk io limit.
+fcomp="linux/git.tar"
+fcompname="${file##*\/}"
+fcompmd5="bd422f5e2d9cb78e34e5a6f664bd87fb"
+
+fdcomp="linux/git.tar.gz"
+fdcompname="${fdcomp##*\/}"
+fdcompmd5="bd422f5e2d9cb78e34e5a6f664bd87fb"
 
 pathlibnx="/root/nxgzip/ver-0.59/nx-zlib_v0.59/libnxz.so"
 cmdgzip="./genwqe_gzip"
@@ -45,71 +51,126 @@ function pr_err(){
 }
 
 
-function file2cache(){
-    pr_notice "-----caching file"
-    cat $file > /dev/null;
-}
+function nxComp(){
+    sfx=$1
+    fgz="$tmpdir/$fcompname.gz.$sfx"
+    ftar="$tmpdir/$fcompname.$sfx"
+    [[ "$todevnull" == "yes" ]] && fgz="/dev/null";
 
-function nxgzipComp(){
-    suffix=$1
-    filegz="$tmpdir/$fileName.gz.$suffix"
-    filetar="$tmpdir/$fileName.$suffix"
-    [[ "$todevnull" == "yes" ]] && filegz="/dev/null";
-
-    pr_debug "%04d: nxgzipComp starting" "$suffix"
+    pr_debug "%04d: nxComp starting" "$sfx"
     if [ "X$nodes" == "X" ]; then
-	time=`{ time LD_PRELOAD=$pathlibnx $cmdgzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+	cmd="LD_PRELOAD=$pathlibnx $cmdgzip $options $fcomp -c > $fgz"
     else
-	time=`{ time LD_PRELOAD=$pathlibnx numactl -N $nodes $cmdgzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+	cmd="LD_PRELOAD=$pathlibnx numactl -N $nodes $cmdgzip $options $fcomp -c > $fgz"
     fi
-    filegzSize=`stat -c %s $filegz`
-    pr_notice "%04d: nxgzipComp finished $time,size $filegzSize" "$suffix"
+    secspent=`{ time $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    fcompSize=`stat -c %s $fcomp`
+    pr_notice "%04d: nxComp finished,time spend: $secspent, fcomp size: $fcompSize" "$sfx"
 
-    [[ "$todevnull" == "yes" ]] && return;
+    [[ $fgz == "/dev/null" ]] && return;
 
-    gunzip $filegz -c > $filetar
-    [[ $? ]] && rm -f $filegz
+    gunzip $fgz -c > $ftar
+    [[ $? ]] && rm -f $fgz
 
-    md5=`md5sum $filetar | awk '{print $1}'`
+    md5=`md5sum $ftar | awk '{print $1}'`
     if [ $md5 != $filemd5 ]; then
-	pr_err "$suffix: md5 check error for orgfile: $file, gzipfile:$filegz, tarfile:$filetar"
+	pr_err "$sfx: md5 check error for orgfile: $file, gzipfile:$fgz, tarfile:$ftar"
 	exit 1
     else
-	pr_debug "$suffix: md5 check ok"
-	rm -f $filetar
+	pr_debug "$sfx: md5 check ok"
+	rm -f $ftar
+    fi
+}
+
+function nxdcomp(){
+    sfx=$1
+    ftar="$tmpdir/$fdcompname.$sfx.tar"
+    [[ "$todevnull" == "yes" ]] && ftar="/dev/null";
+    pr_debug "%04d: nxdcomp starting" "$sfx"
+
+    if [ "X$nodes" == "X" ]; then
+	cmd="LD_PRELOAD=$pathlibnx $cmdgzip $options -d $fdcomp -c > $ftar"
+    else
+	cmd="LD_PRELOAD=$pathlibnx numactl -N $nodes $cmdgzip $options -d $fdcomp -c > $ftar"
+    fi
+    secspent=`{ time $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    fdcompSize=`stat -c %s $fdcomp`
+    pr_notice "%04d: nxdcomp finished,time spend: $secspent, fdcomp size: $fdcompSize" "$sfx"
+
+    [[ $ftar == "/dev/null" ]] && return;
+
+    md5=`md5sum $ftar | awk '{print $1}'`
+    if [ $md5 != $fdcompmd5 ]; then
+	pr_err "$sfx: md5 check error for orgfile: $fdcomp, tarfile:$ftar"
+	exit 1
+    else
+	pr_debug "$sfx: md5 check ok"
+	rm -f $ftar
     fi
 }
 
 function zlibComp(){
-    suffix=$1
-    filegz="/dev/null"
-    filegz="$tmpdir/$fileName.gz.$suffix"
-    filetar="$tmpdir/$fileName.$suffix"
-    [[ "$todevnull" == "yes" ]] && filegz="/dev/null";
+    sfx=$1
+    fgz="/dev/null"
+    fgz="$tmpdir/$fileName.gz.$sfx"
+    [[ "$todevnull" == "yes" ]] && fgz="/dev/null";
 
-    pr_debug "%04d: zlibComp starting" "$suffix"
-    time=`{ time ./genwqe_gzip $options $file -c > $filegz; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
-    filegzSize=`stat -c %s $filegz`
-    pr_notice "%04d: zlibComp finished $time, size $filegzSize" "$suffix"
-    [[ "$todevnull" == "yes" ]] && return;
+    pr_debug "%04d: zlibComp starting" "$sfx"
 
-    rm -f $filegz
+    if [ "X$nodes" == "X" ]; then
+        cmd="$cmdgzip $options $fcomp -c > $fgz"
+    else
+        cmd="numactl -N $nodes $cmdgzip $options $fcomp -c > $fgz"
+    fi
+    secspent=`{ time $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    fcompSize=`stat -c %s $fcomp`
+    pr_notice "%04d: zlibcomp finished,time spend: $secspent, fcomp size: $fcompSize" "$sfx"
+
+    [[ $fgz == "/dev/null" ]] && return;
+
+    rm -f $fgz
 }
 
-function nxgzipThread(){
+function zlibdcomp(){
+    sfx=$1
+    ftar="$tmpdir/$fdcompname.$sfx.tar"
+    [[ "$todevnull" == "yes" ]] && ftar="/dev/null";
+
+    pr_debug "%04d: zlibdcomp starting" "$sfx"
+
+    if [ "X$nodes" == "X" ]; then
+	cmd="$cmdgzip $options -d $fdcomp -c > $ftar"
+    else
+	cmd="numactl -N $nodes $cmdgzip $options -d $fdcomp -c > $ftar"
+    fi
+    secspent=`{ time $cmd; } 2>&1 | awk '{ if( NR==2 ) {print $2}}'`
+    fdcompSize=`stat -c %s $fdcomp`
+    pr_notice "%04d: zlibcomp finished,time spend: $secspent, fdcomp size: $fdcompSize" "$sfx"
+
+    [[ $ftar == "/dev/null" ]] && return;
+
+    rm -f $ftar
+
+}
+
+function nxThread(){
     threads=$1
-    pr_debug "--------nxgzipThread start :$threads-------"
+    pr_debug "--------nxThread start :$threads-------"
     [[ $threads -eq 0 ]] && threads=4
 
     for i in `seq 1 $threads`;do
-	nxgzipComp $i &
+	if [ "X$wktype" = "Xdecomp" ];then
+	    nxdcomp $i &
+	else
+	    nxComp $i &
+	fi
     done
-    pr_debug "-------nxgzipThread all start up: `date +%H:%M:%S`------"
+    pr_debug "-------nxThread all start up: `date +%H:%M:%S`------"
     jobids=`echo $(jobs -p)`
     pr_debug "-------jobs: %s" "$jobids"
 
     wait
-    pr_debug "--------nxgzipThread all finished:$threads-------"
+    pr_debug "--------nxThread all finished:$threads-------"
 }
 
 function zlibThread(){
@@ -117,8 +178,13 @@ function zlibThread(){
     threads=$1
     [[ $threads -eq 0 ]] && threads=4
     for i in `seq 1 $threads`;do
-	zlibComp $i &
+	if [ "X$wktype" = "Xdecomp" ];then
+	    zlibdcomp $i &
+	else
+	    zlibComp $i &
+	fi
     done
+
     pr_debug "-------zlibThread all start up: `date +%H:%M:%S`------"
     jobids=`echo $(jobs -p)`
     pr_debug "-------jobs: %s" "$jobids"
@@ -133,8 +199,8 @@ function loopTest(){
     [[ $loops -eq 0 ]] && loops=5
     [[ $threads -eq 0 ]] && threads=1
     for i in `seq 1 $loops`;do
-	pr_notice "-----nxgzip loop %2d: `date +%H:%M:%S`" "$i"
-	nxgzipThread $threads
+	pr_notice "-----nx loop %2d: `date +%H:%M:%S`" "$i"
+	nxThread $threads
 	echo
     done
 
@@ -155,15 +221,16 @@ function usage () {
 	    -j          jobs num  [$threads]
 	    -n          nodes list  [$nodes]
 	    -o          if to devnull [$todevnull]
-	    -z          if cmpZlib [$cmpZlib]
-	    -d          for genwqe_gzip  use defualt options [$options]
+	    -z          if compare to libz current [$cmpZlib]
+	    -r          reset preptions [$options]
+	    -d          do decmprees [$wktype]
 	    -v          more 'v' more msg [$verbose]
     "
     exit 0
 }
 
 function main(){
-    while getopts "hl:j:bzvn:" opt;do
+    while getopts "hl:j:n:ozrdv" opt;do
         case $opt in
             h)
                 usage
@@ -174,17 +241,20 @@ function main(){
             j)
                 threads="$OPTARG";
                 ;;
-            o)
-                todevnull="no";
-                ;;
             n)
                 nodes="$OPTARG";
                 ;;
-            d)
-		options=""
+            o)
+                todevnull="no";
                 ;;
             z)
 		cmpZlib="no"
+                ;;
+            r)
+		options=""
+                ;;
+            d)
+		wktype="decomp"
                 ;;
             v)
 		let verbose+=1
@@ -202,7 +272,6 @@ function main(){
     done
 
     pr_debug "pid: $$"
-    file2cache
     loopTest $loops $threads
 }
 
@@ -214,6 +283,5 @@ function onCtrlC () {
     kill $jobids
     exit 0
 }
-
 
 main $@
