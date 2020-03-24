@@ -35,110 +35,142 @@ function pr_hint(){
 }
 
 function startmon(){
-	wkdir=$1
-	cd $wkdir ; cp -f $monroot/monitor.sh .; ./monitor.sh `date +%m%d%H%M%S`; cd - > /dev/null
+    wkdir=$1
+    cd $wkdir ; cp -f $monroot/monitor.sh .; ./monitor.sh `date +%m%d%H%M%S`; cd - > /dev/null
 }
 
 function stopmon(){
-	wkdir=$1
-	cd $wkdir; ./monitor.sh `date +%m%d%H%M%S`; cd - > /dev/null
+    wkdir=$1
+    cd $wkdir; ./monitor.sh `date +%m%d%H%M%S`; cd - > /dev/null
+}
+
+function fratiofactor(){
+    # fratiofactor $threads $loops $usize1 $mondir
+    th=$1
+    rpt=$2
+    nbyte1=$((1 << $3))
+    wkdir=$4
+    pr_hint "fratiofactor starting-- sfnames: $sfnames ,engine: $engines ,wkdir: $wkdir ,byte1: $nbyte1 ,thread: $th ,loops: $rpt"
+
+    if [ `echo $engines | grep -c nx` -ge 1 ];then
+	cmd="LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
+    else
+	cmd="numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
+    fi
+
+    cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
+
+    for f in ${sfnames/,/ };do
+	tmpf=$tmpdir/$f
+	rm -rf junk2
+	head -c $nbyte1 $tmpf > junk2
+	ls -l junk2
+
+	pr_hint "seedtmf: $tmpf ,size $nbyte1 ,starting $(date +%m%d%H%M%S)"
+	startmon $wkdir
+	eval $cmd
+	stopmon $wkdir
+	pr_debug "seedtmf: $tmpf ,size $nbyte1 ,finished $(date +%m%d%H%M%S),sleep $waitsec seconds"
+
+	sleep $waitsec
+    done
+
+    pkill nmon
 }
 
 function ewkfactor(){
-	th=$1
-	rpt=$2
-	nbyte1=$((1 << $3))
-	wkdir=$4
-	pr_hint "ewkfactor starting--,seef: $seedf, engine: $engines, wkdir: $wkdir, byte1: $nbyte1, thread: $th, loops: $rpt"
+    th=$1
+    rpt=$2
+    nbyte1=$((1 << $3))
+    wkdir=$4
+    pr_hint "ewkfactor starting--,seedf: $seedf, engine: $engines, wkdir: $wkdir, byte1: $nbyte1, thread: $th, loops: $rpt"
 
-	if [ `echo $engines | grep -c nx` -ge 1 ];then
-		cmd="LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt" 
-	else
-		cmd="numactl -N 0 $cmdgzip junk2 $th $rpt"
-	fi
+    if [ `echo $engines | grep -c nx` -ge 1 ];then
+	cmd="LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt"
+    else
+	cmd="numactl -N 0 $cmdgzip junk2 $th $rpt"
+    fi
 
-	rm -rf junk2
-	head -c $nbyte1 $seedf > junk2
-	ls -l junk2
+    rm -rf junk2
+    head -c $nbyte1 $seedf > junk2
+    ls -l junk2
 
-	cd $wkdir; nmon  -f -s 1 -c 6000 ;cd - > /dev/null ;sleep 5;
-	pr_hint "compress starting $(date +%m%d%H%M%S)"
-	startmon $wkdir
-	eval $cmd -c
-	stopmon $wkdir
+    cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
+    pr_hint "compress starting $(date +%m%d%H%M%S)"
+    startmon $wkdir
+    eval $cmd -c
+    stopmon $wkdir
 
-	sleep $waitsec
+    sleep $waitsec
 
-	pr_hint "decompress starting $(date +%m%d%H%M%S)"
-	startmon $wkdir
-	eval $cmd -d
-	stopmon $wkdir
-	pkill nmon
+    pr_hint "decompress starting $(date +%m%d%H%M%S)"
+    startmon $wkdir
+    eval $cmd -d
+    stopmon $wkdir;pkill nmon
 }
 
 function sizefactor(){
-	th=$1
-	rpt=$2
-	nbyte1=$((1 << $3))
-	nbyte2=$((1 << $4))
-	wkdir=$5
-	pr_hint "sizefactor starting--,seef: $seedf, engine: $engines, wkdir: $wkdir, byte1: $nbyte1, byte2: $nbyte2, thread: $th, loops: $rpt"
+    th=$1
+    rpt=$2
+    nbyte1=$((1 << $3))
+    nbyte2=$((1 << $4))
+    wkdir=$5
+    pr_hint "sizefactor starting--,seedf: $seedf, engine: $engines, wkdir: $wkdir, byte1: $nbyte1, byte2: $nbyte2, thread: $th, loops: $rpt"
 
-	if [ `echo $engines | grep -c nx` -ge 1 ];then
-		cmd="LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
-	else
-		cmd="numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
-	fi
-	rm -rf junk2
-	head -c $nbyte1 $seedf > junk2
-	ls -l junk2
+    if [ `echo $engines | grep -c nx` -ge 1 ];then
+	cmd="LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
+    else
+	cmd="numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
+    fi
+    rm -rf junk2
+    head -c $nbyte1 $seedf > junk2
+    ls -l junk2
 
-	cd $wkdir; nmon  -f -s 1 -c 6000 ;cd - > /dev/null ;sleep 5;
-	pr_hint "size $nbyte1 starting $(date +%m%d%H%M%S)"
-	startmon $wkdir
-	eval $cmd
-	stopmon $wkdir
+    cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
+    pr_hint "size $nbyte1 starting $(date +%m%d%H%M%S)"
+    startmon $wkdir
+    eval $cmd
+    stopmon $wkdir
 
-	sleep $waitsec
-	rm -rf junk2
-	head -c $nbyte2 $seedf > junk2
-	ls -l junk2
+    sleep $waitsec
+    rm -rf junk2
+    head -c $nbyte2 $seedf > junk2
+    ls -l junk2
 
-	pr_hint "size $nbyte2 starting $(date +%m%d%H%M%S)"
-	startmon $wkdir
-	eval $cmd
-	stopmon $wkdir
-	pkill nmon
+    pr_hint "size $nbyte2 starting $(date +%m%d%H%M%S)"
+    startmon $wkdir
+    eval $cmd
+    stopmon $wkdir;pkill nmon
 }
 
-function enginefactor(){
-	th=$1
-	rpt=$2
-	nbyte=$((1 << $3))
-	wkdir=$4
+function engfactor(){
+    th=$1
+    rpt=$2
+    nbyte=$((1 << $3))
+    wkdir=$4
 
-	pr_hint "enginefactor starting--,seedf: $seedf, engines: $engines, wkdir: $wkdir, byte: $nbyte, thread: $th, loops: $rpt"
+    pr_hint "engfactor starting--,seedf: $seedf, engines: $engines, wkdir: $wkdir, byte: $nbyte, thread: $th, loops: $rpt"
 
-	rm -rf junk2
-	head -c $nbyte $seedf > junk2
-	ls -l junk2
+    rm -rf junk2
+    head -c $nbyte $seedf > junk2
+    ls -l junk2
 
-	cd $wkdir; nmon  -f -s 1 -c 6000 ;cd - > /dev/null ;sleep 5;
-	if [ `echo $engines | grep -c nx` -ge 1 ];then
-		startmon $wkdir
-		pr_hint "nx test starting $(date +%m%d%H%M%S)" 
-		eval LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt $engwk
-		stopmon $wkdir
-	fi
+    cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
+    if [ `echo $engines | grep -c nx` -ge 1 ];then
+	startmon $wkdir
+	pr_hint "nx test starting $(date +%m%d%H%M%S)"
+	eval LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt $engwk
+	stopmon $wkdir
+    fi
 
-	if [ `echo $engines | grep -c zlib` -ge 1 ];then
-		sleep $waitsec
-		startmon $wkdir
-		pr_hint "zlib test starting $(date +%m%d%H%M%S)" 
-		numactl -N 0 $cmdgzip junk2 $th $rpt $engwk
-		stopmon $wkdir
-	fi
-	pkill nmon
+    if [ `echo $engines | grep -c zlib` -ge 1 ];then
+	sleep $waitsec
+	startmon $wkdir
+	pr_hint "zlib test starting $(date +%m%d%H%M%S)"
+	numactl -N 0 $cmdgzip junk2 $th $rpt $engwk
+	stopmon $wkdir
+    fi
+    pkill nmon
 }
 
 usize=10
@@ -147,13 +179,13 @@ threads=1
 engines="nx,zlib"
 nodes="0"
 tmpdir="/run/nxgzip"
-seedf="$tmpdir/cbtmpgen.txt"
+sfnames="cbtmpgen.txt"
 cmdgzip="/home/pwz/nx/power-gzip/samples/compdecomp_th_dyn"
 pathlibnx="/home/pwz/nx/libnxz.as13000.47e2c50.so"
 engwk="-c"
 nxenv=""
-
-monroot=/root/nmon
+monroot="/root/nmon"
+nmoncnt=:"60000"
 
 runmode="sf"
 waitsec=20
@@ -162,9 +194,10 @@ verbose="5"
 function usage () {
     echo "Usage :  $0 [options]
 	exp:
-		./rtest.sh -r wf -e zlib -j 64 -l 1000000 -s 18;   	#zlib下2^18数据块,压缩/解压缩下的差异
-		./rtest.sh -r sf -e zlib -j 64 -l 1000000 -s 10,12; 	#zlib下2^10,2^12两种数据块压缩[-w '-d' 解压]时的性能差异
-		./rtest.sh -r ef -j 64 -l 1000000 -s 12;	 	#对2^12次数据块nx与zlib压缩[-w '-d' 解压]性能差异		
+	    ./rtest.sh -r wf -e zlib -j 64 -l 1000000 -s 18;	#zlib下2^18数据块,压缩/解压缩下的差异
+	    ./rtest.sh -r sf -e zlib -j 64 -l 1000000 -s 10,12; #zlib下2^10,2^12两种数据块压缩[-w '-d' 解压]时的性能差异
+	    ./rtest.sh -r ef -j 64 -l 1000000 -s 12;	 	#对2^12次数据块nx与zlib压缩[-w '-d' 解压]性能差异
+	    ./rtest.sh -r rf -j 64 -l 1000000 -s 12;		#分别测试seedf1,seedf2
 	Options:
 	    -h          this help
 	    -s 		size [$usize,max 16MiB]
@@ -175,13 +208,14 @@ function usage () {
 	    -w 		engine work type [$engwk]
 	    -r 		run mode [$runmode]
 	    -a 		append nxgzip save fd env [ $nxenv ]
+	    -f 		seedfnames,sperate by<,> must under $tmpdir [ $sfnames ]
 	    -v          more 'v' more msg [$verbose]
     "
     exit 0
 }
 
 function main(){
-    while getopts "hs:l:j:n:e:w:r:av" opt;do
+    while getopts "hs:l:j:n:e:w:r:f:av" opt;do
         case $opt in
             h)
                 usage
@@ -207,6 +241,9 @@ function main(){
             r)
 		runmode="$OPTARG";
                 ;;
+            f)
+		sfnames="$OPTARG";
+                ;;
             a)
 		nxenv="NX_GZIP_DIS_SAVDEVP=0"
                 ;;
@@ -230,41 +267,33 @@ function main(){
 	fi
     fi
 
-    if [ `echo $runmode | grep -c "sf"` -ge 1 ];then
-	idt="sf-$engines.#$engwk#.$usize.$loops.$threads${idtpend}.`date +%m%d%H%M%S`"
-	mondir=$monroot/$idt
-	mkdir -p $mondir
-	logf="$mondir/$idt.log"
-	usize1=${usize/,*/}
+    sfname=${sfnames/,*/}
+    seedf=$tmpdir/$sfname
 
-    	if [ `echo $usize | grep -c ","` -eq 0 ];then
+    idt="$runmode-$sfnames.$engines.#$engwk#.$usize.$loops.$threads${idtpend}.`date +%m%d%H%M%S`"
+    mondir=$monroot/$idt; mkdir -p $mondir
+
+    logf="$mondir/$idt.log"
+    usize1=${usize/,*/}
+    case $runmode in
+	"sf")
+	    if [ `echo $usize | grep -c ","` -eq 0 ];then
 		pr_err "sizefactor test,need 2 log2 sizeparam, exp 4,8"
-	else
+	    else
 		usize2=${usize/*,/}
-	fi
-	
-	{ sizefactor $threads $loops $usize1 $usize2 $mondir; } 2>&1 | tee $logf
-    fi
-
-    if [ `echo $runmode | grep -c "ef"` -ge 1 ];then
-	idt="ef-$engines.#$engwk#.$usize.$loops.$threads${idtpend}.`date +%m%d%H%M%S`"
-	mondir=$monroot/$idt
-	mkdir -p $mondir
-	logf="$mondir/$idt.log"
-	usize1=${usize/,*/}
-	
-	{ enginefactor $threads $loops $usize1 $mondir; } 2>&1 | tee $logf
-    fi
-
-    if [ `echo $runmode | grep -c "wf"` -ge 1 ];then
-	idt="wf-$engines.#$engwk#.$usize.$loops.$threads${idtpend}.`date +%m%d%H%M%S`"
-	mondir=$monroot/$idt
-	mkdir -p $mondir
-	logf="$mondir/$idt.log"
-	usize1=${usize/,*/}
-	
-	{ ewkfactor $threads $loops $usize1 $mondir; } 2>&1 | tee $logf
-    fi
+	    fi
+	    sizefactor $threads $loops $usize1 $usize2 $mondir
+	    ;;
+	"ef")
+	    engfactor $threads $loops $usize1 $mondir
+	    ;;
+	"wf")
+	    ewkfactor $threads $loops $usize1 $mondir
+	    ;;
+	"rf")
+	    fratiofactor $threads $loops $usize1 $mondir $sfnames
+	    ;;
+    esac 2>&1 | tee $logf
 
 }
 main $@
