@@ -68,7 +68,7 @@ function fratiofactor(){
 	else
 	    sleep $waitsec
 	fi
-	
+
 	tmpf=$tmpdir/$f
 	rm -rf junk2
 	head -c $nbyte1 $tmpf > junk2
@@ -203,8 +203,8 @@ function usage () {
 	exp:
 	    ./rtest.sh -r wf -e zlib -j 64 -l 1000000 -s 18;	#zlib下2^18数据块,压缩/解压缩下的差异
 	    ./rtest.sh -r sf -e zlib -j 64 -l 1000000 -s 10,12; #zlib下2^10,2^12两种数据块压缩[-w '-d' 解压]时的性能差异
-	    ./rtest.sh -r ef -j 64 -l 1000000 -s 12;	 	#对2^12次数据块nx与zlib压缩[-w '-d' 解压]性能差异
-	    ./rtest.sh -r rf -j 64 -l 1000000 -s 12;		#分别测试seedf1,seedf2
+	    ./rtest.sh -r ef -j 64 -l 1000000 -s 12;		#对2^12次数据块nx与zlib压缩[-w '-d' 解压]性能差异
+	    ./rtest.sh -r rf -f sf1,sf2 -j 64 -l 1000000 -s 12;	#分别测试seedf1,seedf2
 	Options:
 	    -h          this help
 	    -s 		size [$usize,max 16MiB]
