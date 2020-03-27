@@ -60,7 +60,15 @@ function fratiofactor(){
 
     cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
 
+    isfirst="Yes"
+
     for f in ${sfnames/,/ };do
+	if [ "X$isfirst" == "XYes" ];then
+	    isfirst=""
+	else
+	    sleep $waitsec
+	fi
+	
 	tmpf=$tmpdir/$f
 	rm -rf junk2
 	head -c $nbyte1 $tmpf > junk2
@@ -72,7 +80,6 @@ function fratiofactor(){
 	stopmon $wkdir
 	pr_debug "seedtmf: $tmpf ,size $nbyte1 ,finished $(date +%m%d%H%M%S),sleep $waitsec seconds"
 
-	sleep $waitsec
     done
 
     pkill nmon
@@ -185,7 +192,7 @@ pathlibnx="/home/pwz/nx/libnxz.as13000.47e2c50.so"
 engwk="-c"
 nxenv=""
 monroot="/root/nmon"
-nmoncnt=:"60000"
+nmoncnt="60000"
 
 runmode="sf"
 waitsec=20
@@ -270,7 +277,7 @@ function main(){
     sfname=${sfnames/,*/}
     seedf=$tmpdir/$sfname
 
-    idt="$runmode-$sfnames.$engines.#$engwk#.$usize.$loops.$threads${idtpend}.`date +%m%d%H%M%S`"
+    idt="$runmode-$sfnames-$engines.#$engwk#.$usize.$loops.$threads${idtpend}.`date +%m%d%H%M%S`"
     mondir=$monroot/$idt; mkdir -p $mondir
 
     logf="$mondir/$idt.log"

@@ -1,0 +1,651 @@
+From aa88ef542e014746dc1eae158fd6107451c65816 Mon Sep 17 00:00:00 2001
+From: Rowan Pang <pangweizhen.2008@hotmail.com>
+Date: Thu, 26 Mar 2020 18:33:21 +0800
+Subject: [PATCH] bechmark test ok
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+---
+ Makefile                |   4 +-
+ samples/Makefile        |   7 +-
+ samples/compdecomp_th.c | 166 ++++++++++++++------------
+ samples/rtest.sh        | 306 ++++++++++++++++++++++++++++++++++++++++++++++++
+ samples/run-series.sh   |  31 ++++-
+ test/Makefile           |   8 +-
+ 6 files changed, 437 insertions(+), 85 deletions(-)
+ create mode 100755 samples/rtest.sh
+
+diff --git a/Makefile b/Makefile
+index 9ca9cd8..27476c0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,10 +1,10 @@
+-OPTCC = /opt/at11.0/bin/gcc
++OPTCC = /opt/at12.0/bin/gcc
+ ifneq ("$(wildcard $(OPTCC))","")
+ 	CC = $(OPTCC)
+ else
+ 	CC = gcc
+ endif
+-FLG = -std=gnu11
++FLG = -std=gnu11 -g
+ SFLAGS = -O3 -fPIC -D_LARGEFILE64_SOURCE=1 -DHAVE_HIDDEN
+ ZLIB = -DZLIB_API
+ CFLAGS = $(FLG) $(SFLAGS) $(ZLIB) -mcpu=power9 #-DNXTIMER
+diff --git a/samples/Makefile b/samples/Makefile
+index 24d6c2f..94f6bfb 100644
+--- a/samples/Makefile
++++ b/samples/Makefile
+@@ -1,4 +1,4 @@
+-OPTCC = /opt/at11.0/bin/gcc
++OPTCC = /opt/at12.0/bin/gcc
+ ifneq ("$(wildcard $(OPTCC))","")
+         CC = $(OPTCC)
+ else
+@@ -8,7 +8,7 @@ endif
+ CFLAGS = -O3
+ SRC =
+ INC = ../inc_nx
+-TESTS = gunzip_nx_test gzip_nxfht_test gzip_nxdht_test compdecomp_th
++TESTS = gunzip_nx_test gzip_nxfht_test gzip_nxdht_test compdecomp_th makedata compdecomp_th_dyn
+ NXFLAGS = #-DNXDBG  #-DNXDBG -DNXTIMER -DNX_MMAP
+ DHT_O = gzip_nxdht.o gzip_vas.o nx_dht.o nx_dht_builtin.o nx_dhtgen.o
+ FHT_O = gzip_nxfht.o gzip_vas.o
+@@ -73,6 +73,9 @@ compdecomp:	compdecomp.c ../libnxz.a
+ compdecomp_th: compdecomp_th.c  ../libnxz.a
+ 	$(CC) $(CFLAGS) -I../inc_nx -I../ -L../ -L/usr/lib/ -o compdecomp_th compdecomp_th.c ../libnxz.a -lpthread
+ 
++compdecomp_th_dyn: compdecomp_th.c  
++	$(CC) $(CFLAGS) -I../inc_nx -I../ -L../ -L/usr/lib/ -o $@ compdecomp_th.c -lpthread $(shell pkg-config --libs zlib)
++
+ clean:
+ 	rm -f $(TESTS) *.o *.c~ *.h~ Makefile~ zpipe compdecomp compdecomp_th makedata \
+ 	zpipe_dict_nx zpipe_dict_zlib crc_perf_test_zlib crc_perf_test_vmx gzm
+diff --git a/samples/compdecomp_th.c b/samples/compdecomp_th.c
+index 8b0123d..7155535 100644
+--- a/samples/compdecomp_th.c
++++ b/samples/compdecomp_th.c
+@@ -356,9 +356,11 @@ int main(int argc, char **argv)
+ 	void *ret;
+ 	long iterations;
+ 	double sum;
++	char *wkstr;
++	char wktype=3;
+ 	
+-	if (argc != 3 && argc != 4) {
+-		fprintf(stderr, "usage: %s <fname> <thread_count> [<iterations>]\n", argv[0]);
++	if (argc != 3 && argc != 4 && argc != 5) {
++		fprintf(stderr, "usage: %s <fname> <thread_count> [<iterations>] [wktype]\n", argv[0]);
+ 		exit(-1);
+ 	}
+ 	assert( (num_threads = atoi(argv[2])) <= MAX_THREADS);
+@@ -370,10 +372,20 @@ int main(int argc, char **argv)
+ 	/* need this for pretty print */
+ 	pthread_barrier_init(&barr, NULL, num_threads);
+ 
+-	if (argc == 4)
++	if (argc >= 4)
+ 		iterations = atoi(argv[3]);
+ 	else
+ 		iterations = 100;
++	if (argc == 5)
++		wkstr = argv[4];
++	if (0 == strcmp(wkstr,"-c"))
++		wktype=1;
++	if (0 == strcmp(wkstr,"-d"))
++		wktype=2;
++	if (!(strcmp(wkstr,"-cd")&&strcmp(wkstr,"-dc")))
++		wktype=3;
++
++	//fprintf(stderr,"wktype id :%d\n",wktype);
+ 
+ 	unsigned long cksum = 1;	
+ #ifdef SIMPLE_CHECKSUM
+@@ -381,89 +393,93 @@ int main(int argc, char **argv)
+ 	fprintf(stderr, "source checksum %08lx; note: checksum verif will reduce throughput; assert thrown on mismatch\n", cksum);
+ #endif
+ 	
+-	fprintf(stderr, "starting %d compress threads %ld iterations\n", num_threads, iterations);
+-	for (i = 0; i < num_threads; i++) {
+-		th_args[i].inbuf = inbuf;
+-		th_args[i].inlen = inlen;
+-		th_args[i].checksum = cksum;				
+-		th_args[i].my_id = i;
+-		th_args[i].iterations = iterations;
+-
+-		rc = pthread_create(&threads[i], NULL, comp_file_multith, (void *)&th_args[i]);
+-		if (rc != 0) {
+-			fprintf(stderr, "error: pthread_create %d\n", rc);
+-			return rc;
++	double maxbw = 0;
++	double minbw = 1.0e20;
++	if ( wktype & 0x01){
++		fprintf(stderr, "starting %d compress threads %ld iterations\n", num_threads, iterations);
++		for (i = 0; i < num_threads; i++) {
++			th_args[i].inbuf = inbuf;
++			th_args[i].inlen = inlen;
++			th_args[i].checksum = cksum;				
++			th_args[i].my_id = i;
++			th_args[i].iterations = iterations;
++
++			rc = pthread_create(&threads[i], NULL, comp_file_multith, (void *)&th_args[i]);
++			if (rc != 0) {
++				fprintf(stderr, "error: pthread_create %d\n", rc);
++				return rc;
++			}
+ 		}
+-	}
+ 
+-	/* wait for the threads to finish */
+-	for (i = 0; i < num_threads; i++) {
+-		rc = pthread_join(threads[i], &ret);
+-		if (rc != 0) {
+-			fprintf(stderr, "error: pthread %d cannot be joined %p\n", i, ret);
+-			return rc;
++		/* wait for the threads to finish */
++		for (i = 0; i < num_threads; i++) {
++			rc = pthread_join(threads[i], &ret);
++			if (rc != 0) {
++				fprintf(stderr, "error: pthread %d cannot be joined %p\n", i, ret);
++				return rc;
++			}
+ 		}
+-	}
+ 
+-	/* report results */
+-	/* fprintf(stderr, "Compress individual threads throughput GB/s:\n"); */
+-	sum = 0;
+-	double maxbw = 0;
+-	double minbw = 1.0e20;
+-	for (i=0; i < num_threads; i++) {
+-		double gbps = (double)th_args[i].inlen * (double)th_args[i].iterations /
+-			(double)th_args[i].elapsed_time / 1.0e9;
+-		/* fprintf(stderr, "%6.4g ", gbps); */
+-		sum += gbps;
+-		if (gbps < minbw) minbw = gbps;
+-		if (gbps > maxbw) maxbw = gbps;
+-	}
+-	fprintf(stderr, "\nTotal compress throughput GB/s %7.4g, bytes %ld, iterations %ld, threads %d, per thread maxbw %7.4g, minbw %7.4g\n\n",
+-		sum, th_args[0].inlen, th_args[0].iterations, num_threads, maxbw, minbw);	
++		/* report results */
++		/* fprintf(stderr, "Compress individual threads throughput GB/s:\n"); */
++		sum = 0;
++		for (i=0; i < num_threads; i++) {
++			double gbps = (double)th_args[i].inlen * (double)th_args[i].iterations /
++				(double)th_args[i].elapsed_time / 1.0e9;
++			/* fprintf(stderr, "%6.4g ", gbps); */
++			sum += gbps;
++			if (gbps < minbw) minbw = gbps;
++			if (gbps > maxbw) maxbw = gbps;
++		}
++		fprintf(stderr, "\nTotal compress throughput GB/s %7.4g, bytes %ld, iterations %ld, threads %d, per thread maxbw %7.4g, minbw %7.4g\n\n",
++			sum, th_args[0].inlen, th_args[0].iterations, num_threads, maxbw, minbw);	
+ 
++	}
+ 
+-	
+-	fprintf(stderr, "starting %d uncompress threads\n", num_threads);
+-	for (i = 0; i < num_threads; i++) {
+-		th_args[i].inbuf = inbuf;
+-		th_args[i].inlen = inlen;
+-		th_args[i].checksum = cksum;						
+-		th_args[i].my_id = i;
+-		th_args[i].iterations = iterations;
+-
+-		rc = pthread_create(&threads[i], NULL, decomp_file_multith, (void *)&th_args[i]);
+-		if (rc != 0) {
+-			fprintf(stderr, "error: pthread_create %d\n", rc);
+-			return rc;
++	if ( wktype & 0x02){	
++		fprintf(stderr, "starting %d uncompress threads\n", num_threads);
++		for (i = 0; i < num_threads; i++) {
++			th_args[i].inbuf = inbuf;
++			th_args[i].inlen = inlen;
++			th_args[i].checksum = cksum;						
++			th_args[i].my_id = i;
++			th_args[i].iterations = iterations;
++
++			rc = pthread_create(&threads[i], NULL, decomp_file_multith, (void *)&th_args[i]);
++			if (rc != 0) {
++				fprintf(stderr, "error: pthread_create %d\n", rc);
++				return rc;
++			}
+ 		}
+-	}
+ 
+-	/* wait for the threads to finish */
+-	for (i = 0; i < num_threads; i++) {
+-		rc = pthread_join(threads[i], &ret);
+-		if (rc != 0) {
+-			fprintf(stderr, "error: pthread %d cannot be joined %p\n", i, ret);
+-			return rc;
++		/* wait for the threads to finish */
++		for (i = 0; i < num_threads; i++) {
++			rc = pthread_join(threads[i], &ret);
++			if (rc != 0) {
++				fprintf(stderr, "error: pthread %d cannot be joined %p\n", i, ret);
++				return rc;
++			}
++
+ 		}
+ 
+-	}
++		/* report results */
++		/* fprintf(stderr, "Uncompress individual threads throughput GB/s:\n"); */
++		sum = 0;
++		maxbw = 0;
++		minbw = 1.0e20;	
++		for (i=0; i < num_threads; i++) {
++			//fprintf(stderr,"threads i %d,inlen :%d\n",i,th_args[i].inlen);
++			double gbps = (double)th_args[i].inlen * (double)th_args[i].iterations /
++				(double)th_args[i].elapsed_time / 1.0e9;
++			/* fprintf(stderr, "%6.4g ", gbps); */
++			sum += gbps;
++			if (gbps < minbw) minbw = gbps;
++			if (gbps > maxbw) maxbw = gbps;
++		}
++		fprintf(stderr, "\nTotal uncompress throughput GB/s %7.4g, bytes %ld, iterations %ld, threads %d, per thread maxbw %7.4g, minbw %7.4g\n\n",
++			sum, th_args[0].inlen, th_args[0].iterations, num_threads, maxbw, minbw);	
++	}	
+ 
+-	/* report results */
+-	/* fprintf(stderr, "Uncompress individual threads throughput GB/s:\n"); */
+-	sum = 0;
+-	maxbw = 0;
+-	minbw = 1.0e20;	
+-	for (i=0; i < num_threads; i++) {
+-		double gbps = (double)th_args[i].inlen * (double)th_args[i].iterations /
+-			(double)th_args[i].elapsed_time / 1.0e9;
+-		/* fprintf(stderr, "%6.4g ", gbps); */
+-		sum += gbps;
+-		if (gbps < minbw) minbw = gbps;
+-		if (gbps > maxbw) maxbw = gbps;
+-	}
+-	fprintf(stderr, "\nTotal uncompress throughput GB/s %7.4g, bytes %ld, iterations %ld, threads %d, per thread maxbw %7.4g, minbw %7.4g\n\n",
+-		sum, th_args[0].inlen, th_args[0].iterations, num_threads, maxbw, minbw);	
+-	
+ 	return rc;
+ }
+ 
+diff --git a/samples/rtest.sh b/samples/rtest.sh
+new file mode 100755
+index 0000000..fe441cb
+--- /dev/null
++++ b/samples/rtest.sh
+@@ -0,0 +1,306 @@
++#!/bin/bash
++
++function pr_debug(){
++    fmt="$1" && shift
++    [ $verbose -ge 7 ] && printf -- "$fmt\n" "$@"
++}
++
++function pr_info(){
++    fmt="$1" && shift
++    [ $verbose -ge 6 ] && printf -- "$fmt\n" "$@"
++}
++
++function pr_notice(){
++    fmt="$1" && shift
++    [ $verbose -ge 5 ] && printf -- "$fmt\n" "$@"
++}
++
++function pr_warn(){
++    #33m,yellow
++    fmt="$1" && shift
++    [ $verbose -ge 4 ] && printf -- "\033[1;33m""WARNING! $fmt\n""\033[0m" "$@"
++}
++
++function pr_err(){
++    #31m,red
++    fmt="$1" && shift
++    [ $verbose -ge 3 ] && printf -- "\033[1;31m""ERROR! $fmt,Exit -1!\n""\033[0m" "$@"
++    exit -1
++}
++
++function pr_hint(){
++    #33m,blue
++    fmt="$1" && shift
++    [ $verbose -ge 4 ] && printf -- "\033[1;38m""HINT! $fmt\n""\033[0m" "$@"
++}
++
++function startmon(){
++    wkdir=$1
++    cd $wkdir ; cp -f $monroot/monitor.sh .; ./monitor.sh `date +%m%d%H%M%S`; cd - > /dev/null
++}
++
++function stopmon(){
++    wkdir=$1
++    cd $wkdir; ./monitor.sh `date +%m%d%H%M%S`; cd - > /dev/null
++}
++
++function fratiofactor(){
++    # fratiofactor $threads $loops $usize1 $mondir
++    th=$1
++    rpt=$2
++    nbyte1=$((1 << $3))
++    wkdir=$4
++    pr_hint "fratiofactor starting-- sfnames: $sfnames ,engine: $engines ,wkdir: $wkdir ,byte1: $nbyte1 ,thread: $th ,loops: $rpt"
++
++    if [ `echo $engines | grep -c nx` -ge 1 ];then
++	cmd="LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
++    else
++	cmd="numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
++    fi
++
++    cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
++
++    isfirst="Yes"
++
++    for f in ${sfnames/,/ };do
++	if [ "X$isfirst" == "XYes" ];then
++	    isfirst=""
++	else
++	    sleep $waitsec
++	fi
++	
++	tmpf=$tmpdir/$f
++	rm -rf junk2
++	head -c $nbyte1 $tmpf > junk2
++	ls -l junk2
++
++	pr_hint "seedtmf: $tmpf ,size $nbyte1 ,starting $(date +%m%d%H%M%S)"
++	startmon $wkdir
++	eval $cmd
++	stopmon $wkdir
++	pr_debug "seedtmf: $tmpf ,size $nbyte1 ,finished $(date +%m%d%H%M%S),sleep $waitsec seconds"
++
++    done
++
++    pkill nmon
++}
++
++function ewkfactor(){
++    th=$1
++    rpt=$2
++    nbyte1=$((1 << $3))
++    wkdir=$4
++    pr_hint "ewkfactor starting--,seedf: $seedf, engine: $engines, wkdir: $wkdir, byte1: $nbyte1, thread: $th, loops: $rpt"
++
++    if [ `echo $engines | grep -c nx` -ge 1 ];then
++	cmd="LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt"
++    else
++	cmd="numactl -N 0 $cmdgzip junk2 $th $rpt"
++    fi
++
++    rm -rf junk2
++    head -c $nbyte1 $seedf > junk2
++    ls -l junk2
++
++    cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
++    pr_hint "compress starting $(date +%m%d%H%M%S)"
++    startmon $wkdir
++    eval $cmd -c
++    stopmon $wkdir
++
++    sleep $waitsec
++
++    pr_hint "decompress starting $(date +%m%d%H%M%S)"
++    startmon $wkdir
++    eval $cmd -d
++    stopmon $wkdir;pkill nmon
++}
++
++function sizefactor(){
++    th=$1
++    rpt=$2
++    nbyte1=$((1 << $3))
++    nbyte2=$((1 << $4))
++    wkdir=$5
++    pr_hint "sizefactor starting--,seedf: $seedf, engine: $engines, wkdir: $wkdir, byte1: $nbyte1, byte2: $nbyte2, thread: $th, loops: $rpt"
++
++    if [ `echo $engines | grep -c nx` -ge 1 ];then
++	cmd="LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
++    else
++	cmd="numactl -N 0 $cmdgzip junk2 $th $rpt $engwk"
++    fi
++    rm -rf junk2
++    head -c $nbyte1 $seedf > junk2
++    ls -l junk2
++
++    cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
++    pr_hint "size $nbyte1 starting $(date +%m%d%H%M%S)"
++    startmon $wkdir
++    eval $cmd
++    stopmon $wkdir
++
++    sleep $waitsec
++    rm -rf junk2
++    head -c $nbyte2 $seedf > junk2
++    ls -l junk2
++
++    pr_hint "size $nbyte2 starting $(date +%m%d%H%M%S)"
++    startmon $wkdir
++    eval $cmd
++    stopmon $wkdir;pkill nmon
++}
++
++function engfactor(){
++    th=$1
++    rpt=$2
++    nbyte=$((1 << $3))
++    wkdir=$4
++
++    pr_hint "engfactor starting--,seedf: $seedf, engines: $engines, wkdir: $wkdir, byte: $nbyte, thread: $th, loops: $rpt"
++
++    rm -rf junk2
++    head -c $nbyte $seedf > junk2
++    ls -l junk2
++
++    cd $wkdir; nmon  -f -s 1 -c $nmoncnt ;cd - > /dev/null ;sleep 5;
++    if [ `echo $engines | grep -c nx` -ge 1 ];then
++	startmon $wkdir
++	pr_hint "nx test starting $(date +%m%d%H%M%S)"
++	eval LD_PRELOAD=$pathlibnx $nxenv numactl -N 0 $cmdgzip junk2 $th $rpt $engwk
++	stopmon $wkdir
++    fi
++
++    if [ `echo $engines | grep -c zlib` -ge 1 ];then
++	sleep $waitsec
++	startmon $wkdir
++	pr_hint "zlib test starting $(date +%m%d%H%M%S)"
++	numactl -N 0 $cmdgzip junk2 $th $rpt $engwk
++	stopmon $wkdir
++    fi
++    pkill nmon
++}
++
++usize=10
++loops=1
++threads=1
++engines="nx,zlib"
++nodes="0"
++tmpdir="/run/nxgzip"
++sfnames="cbtmpgen.txt"
++cmdgzip="/home/pwz/nx/power-gzip/samples/compdecomp_th_dyn"
++pathlibnx="/home/pwz/nx/libnxz.as13000.47e2c50.so"
++engwk="-c"
++nxenv=""
++monroot="/root/nmon"
++nmoncnt="60000"
++
++runmode="sf"
++waitsec=20
++
++verbose="5"
++function usage () {
++    echo "Usage :  $0 [options]
++	exp:
++	    ./rtest.sh -r wf -e zlib -j 64 -l 1000000 -s 18;	#zlib下2^18数据块,压缩/解压缩下的差异
++	    ./rtest.sh -r sf -e zlib -j 64 -l 1000000 -s 10,12; #zlib下2^10,2^12两种数据块压缩[-w '-d' 解压]时的性能差异
++	    ./rtest.sh -r ef -j 64 -l 1000000 -s 12;	 	#对2^12次数据块nx与zlib压缩[-w '-d' 解压]性能差异
++	    ./rtest.sh -r rf -j 64 -l 1000000 -s 12;		#分别测试seedf1,seedf2
++	Options:
++	    -h          this help
++	    -s 		size [$usize,max 16MiB]
++	    -l          loops num [$loops]
++	    -j          jobs num  [$threads]
++	    -n          nodes list  [$nodes]
++	    -e          engines to test current [$engines]
++	    -w 		engine work type [$engwk]
++	    -r 		run mode [$runmode]
++	    -a 		append nxgzip save fd env [ $nxenv ]
++	    -f 		seedfnames,sperate by<,> must under $tmpdir [ $sfnames ]
++	    -v          more 'v' more msg [$verbose]
++    "
++    exit 0
++}
++
++function main(){
++    while getopts "hs:l:j:n:e:w:r:f:av" opt;do
++        case $opt in
++            h)
++                usage
++                ;;
++	    s)
++		usize="$OPTARG";
++		;;
++            l)
++                loops="$OPTARG";
++                ;;
++            j)
++                threads="$OPTARG";
++                ;;
++            n)
++                nodes="$OPTARG";
++                ;;
++            e)
++		engines="$OPTARG";
++                ;;
++	    w)
++		engwk="$OPTARG"
++		;;
++            r)
++		runmode="$OPTARG";
++                ;;
++            f)
++		sfnames="$OPTARG";
++                ;;
++            a)
++		nxenv="NX_GZIP_DIS_SAVDEVP=0"
++                ;;
++            v)
++		let verbose+=1
++                ;;
++            :)
++                echo "Need arguement $OPTARG"
++                usage
++                ;;
++            \?)
++                echo "Invalid option: $OPTARG"
++                usage
++                ;;
++
++        esac
++    done
++    if [ `echo $engines | grep -c nx` -ge 1 ];then
++	if [ "X$nxenv" != X ];then
++		idtpend=".sfd"
++	fi
++    fi
++
++    sfname=${sfnames/,*/}
++    seedf=$tmpdir/$sfname
++
++    idt="$runmode-$sfnames-$engines.#$engwk#.$usize.$loops.$threads${idtpend}.`date +%m%d%H%M%S`"
++    mondir=$monroot/$idt; mkdir -p $mondir
++
++    logf="$mondir/$idt.log"
++    usize1=${usize/,*/}
++    case $runmode in
++	"sf")
++	    if [ `echo $usize | grep -c ","` -eq 0 ];then
++		pr_err "sizefactor test,need 2 log2 sizeparam, exp 4,8"
++	    else
++		usize2=${usize/*,/}
++	    fi
++	    sizefactor $threads $loops $usize1 $usize2 $mondir
++	    ;;
++	"ef")
++	    engfactor $threads $loops $usize1 $mondir
++	    ;;
++	"wf")
++	    ewkfactor $threads $loops $usize1 $mondir
++	    ;;
++	"rf")
++	    fratiofactor $threads $loops $usize1 $mondir $sfnames
++	    ;;
++    esac 2>&1 | tee $logf
++
++}
++main $@
+diff --git a/samples/run-series.sh b/samples/run-series.sh
+index e9aef29..acceb1c 100755
+--- a/samples/run-series.sh
++++ b/samples/run-series.sh
+@@ -1,10 +1,13 @@
+ #!/bin/bash
+ 
+-plotfn=log.log
+-
+-for th in 1 2 4 8 16 32 64 80
++plotfn=nx-log.log
++echo "nx begin"
++min=0
++max=20
++cmd=/home/pwz/nx/power-gzip/samples/compdecomp_th_dyn
++for th in 1 2 4 8 16 32 64
+ do
+-    for a in `seq 0 20`  # size
++    for a in `seq $min $max`  # size
+     do
+ 	b=$((1 << $a))
+ 	nbyte=$(($b * 1024))
+@@ -14,8 +17,26 @@ do
+ 	rm -f junk2
+ 	head -c $nbyte $1 > junk2;
+ 	ls -l junk2;
+-	numactl -N 0 ./compdecomp_th junk2 $th $rpt
++	LD_PRELOAD=/home/pwz/nx/libnxz.as13000.47e2c50.so NX_GZIP_DIS_SAVDEVP=0 numactl -N 0 $cmd junk2 $th $rpt
+     done
+ done  > $plotfn 2>&1
+ 
++exit
++echo "nx finished,gzip begin"
+ 
++plotfn=zlib-log.log
++for th in 1 2 4 8 16 32 64
++do
++    for a in `seq $min $max`  # size
++    do
++	b=$((1 << $a))
++	nbyte=$(($b * 1024))
++	rpt=$((1000 * 1000 * 1000 * 10)) # 10GB
++	rpt=$(( ($rpt+$nbyte-1)/$nbyte )) # iters
++	rpt=$(( ($rpt+$th-1)/$th )) # per thread
++	rm -f junk2
++	head -c $nbyte $1 > junk2;
++	ls -l junk2;
++	numactl -N 0 $cmd junk2 $th $rpt
++    done
++done  > $plotfn 2>&1
+diff --git a/test/Makefile b/test/Makefile
+index 0ad1a51..808422d 100644
+--- a/test/Makefile
++++ b/test/Makefile
+@@ -1,4 +1,10 @@
+-CC = gcc
++#CC = gcc
++OPTCC = /opt/at12.0/bin/gcc
++ifneq ("$(wildcard $(OPTCC))","")
++	CC = $(OPTCC)
++else
++	CC = gcc
++endif
+ FLG = -std=gnu11
+ CFLAGS = -O3 $(FLG)
+ 
+-- 
+2.13.0
+

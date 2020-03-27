@@ -1,0 +1,21 @@
+
+
+
+1,git url
+    root at rowanInspur in /home/smbPublic/nxgzip/nx/power-gzip 03-27 08:12:34  (master●)
+    $ git remote -v								(master↑1|…)
+	origin	https://github.com/libnxz/power-gzip.git (fetch)
+	origin	https://github.com/libnxz/power-gzip.git (push)
+
+2,based on
+    commit aa88ef542e014746dc1eae158fd6107451c65816 (HEAD -> master)
+    Author: Rowan Pang <pangweizhen.2008@hotmail.com>
+    Date:   Thu Mar 26 18:33:21 2020 +0800
+	bechmark test ok
+
+    create mode 100755 samples/rtest.sh
+    commit 209304e8cc8b0c467a1eb5a6e30bb8d1be9678c6 (origin/master, origin/HEAD)
+    Author: Yi Li <shliyi@cn.ibm.com>
+    Date:   Mon Dec 30 16:39:56 2019 +0800
+
+	Update README.md
